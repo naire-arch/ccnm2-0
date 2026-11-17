@@ -11,9 +11,8 @@ A single-page web app for monitoring and evaluating patient progress with nutrit
 - **TPN**: dextrose, amino acids, lipid; calculated kcal, kcal/kg and GIR
 - **NBU feeds** (new): feed prescription, feed log (offered/taken, aspirates, vomiting, distension), daily weights with growth chart, ml/kg/day (enteral + TPN), kcal/kg/day, weight velocity, and configurable alerts
 - **Settings & data**: alert thresholds, milk kcal values, JSON export/import
-
 ## Run it
-https://naire-arch.github.io/ccnm/.
+https://naire-arch.github.io/ccnm2-0/.
 
 ## Data and privacy
 All data is stored in the browser's `localStorage` on that device only. Nothing is sent anywhere. Use patient aliases unless your governance permits identifiers, and export JSON backups regularly. Clearing browser data erases records.
