@@ -15,7 +15,7 @@ A single-page web app for monitoring and evaluating patient progress with nutrit
 ## Run it
 No build step and no dependencies.
 - Locally: open `index.html` in a browser.
-- GitHub Pages: push `index.html` and `README.md` to a repo, then **Settings → Pages → Deploy from branch → main / (root)**. The app is served at `https://<user>.github.io/<repo>/`.
+- GitHub Pages: push `index.html` and `README.md` to a repo, then **Settings → Pages → Deploy from branch → main / (root)**. The app is served at `https://naire-arch.github.io/ccnm/`.
 
 ## Data and privacy
 All data is stored in the browser's `localStorage` on that device only. Nothing is sent anywhere. Use patient aliases unless your governance permits identifiers, and export JSON backups regularly. Clearing browser data erases records.
@@ -26,5 +26,4 @@ All data is stored in the browser's `localStorage` on that device only. Nothing 
 - Weight velocity (g/kg/day) uses the average weight over the no-gain window
 - Alert thresholds (weight loss %, no-gain days, low intake %, large aspirate %) are defaults and **must be set to local protocol**
 
-## Licence
-Add a licence of your choice (for example MIT) before publishing.
+
