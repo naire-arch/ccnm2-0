@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCNM v2 – Care Unit Nutrition Monitoring</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1d2733;--mut:#6b7785;--pri:#0b6e75;--pri2:#e0f1f2;--warn:#b45309;--warnbg:#fef3c7;--bad:#b91c1c;--badbg:#fee2e2;--ok:#166534;--okbg:#dcfce7;--line:#dde3e8}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--pri);color:#fff;padding:12px 16px}
+header h1{margin:0;font-size:18px}
+header small{opacity:.85}
+.disc{background:var(--warnbg);color:var(--warn);padding:6px 16px;font-size:12.5px}
+nav{display:flex;gap:4px;overflow-x:auto;background:#fff;border-bottom:1px solid var(--line);padding:0 8px}
+nav button{border:0;background:none;padding:12px 14px;cursor:pointer;font-size:14px;color:var(--mut);white-space:nowrap;border-bottom:3px solid transparent}
+nav button.on{color:var(--pri);border-color:var(--pri);font-weight:600}
+main{max-width:1100px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.card h2{margin:0 0 10px;font-size:16px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--mut);margin-bottom:2px}
+input,select,textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;font:inherit;background:#fff}
+button.btn{background:var(--pri);color:#fff;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;font:inherit}
+button.sec{background:var(--pri2);color:var(--pri)}
+button.del{background:none;border:0;color:var(--bad);cursor:pointer}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600;font-size:12px}
+.tw{overflow-x:auto}
+.stat{background:var(--pri2);border-radius:8px;padding:10px}
+.stat b{display:block;font-size:20px;color:var(--pri)}
+.stat span{font-size:12px;color:var(--mut)}
+.al{padding:8px 10px;border-radius:6px;margin:4px 0;font-size:13.5px}
+.al.w{background:var(--warnbg);color:var(--warn)}
+.al.b{background:var(--badbg);color:var(--bad)}
+.al.o{background:var(--okbg);color:var(--ok)}
+.muted{color:var(--mut)}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;background:var(--pri2);color:var(--pri);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>CCNM v2 <small>· Critical Care &amp; Renal · Neonatal (NBU) Nutrition Monitoring</small></h1>
+</header>
+<div class="disc">Monitoring and decision-support aid only. Not for diagnosis. Clinical decisions rest with the treating team and local protocols. Data is stored only in this browser.</div>
+<nav id="nav"></nav>
+<main id="view"></main>
+
+<script>
+"use strict";
+/* ---------- storage ---------- */
+const KEY = "ccnm_v2";
+const DEFAULTS = {
+  patients: [], nutrition: [], meds: [], tpn: [], prescriptions: [], feeds: [], weights: [],
+  settings: {
+    wlPct: 10,          // % loss from birth weight that raises an alert
+    noGainDays: 3,      // days without weight gain
+    intakePct: 80,      // % of prescribed target below which intake is flagged
+    aspPct: 50,         // aspirate as % of offered feed considered large
+    kcalTarget: 110,    // NBU kcal/kg/day target for reference
+    milk: { "EBM": 67, "EBM + fortifier": 80, "Donor EBM": 67, "Preterm formula": 80, "Term formula": 67 }
+  }
+};
+let db = load();
+let pid = localStorage.getItem("ccnm_pid") || "";
+let tab = "dashboard";
+
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KEY));
+    if (d) { d.settings = Object.assign({}, DEFAULTS.settings, d.settings); d.settings.milk = Object.assign({}, DEFAULTS.settings.milk, d.settings.milk); return Object.assign({}, DEFAULTS, d); }
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULTS));
+}
+function save() { localStorage.setItem(KEY, JSON.stringify(db)); }
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const nowLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+const num = v => (v === "" || v == null || isNaN(+v)) ? null : +v;
+const f1 = v => v == null || isNaN(v) ? "–" : (Math.round(v * 10) / 10).toString();
+const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+const patient = () => db.patients.find(p => p.id === pid);
+const mine = k => db[k].filter(r => r.pid === pid);
+
+/* ---------- generic form + table helpers ---------- */
+function field(f, val) {
+  const v = val ?? f.def ?? "";
+  if (f.t === "select") return `<div><label>${f.l}</label><select name="${f.k}">${f.o.map(o => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`;
+  if (f.t === "area") return `<div style="grid-column:1/-1"><label>${f.l}</label><textarea name="${f.k}" rows="2">${esc(v)}</textarea></div>`;
+  return `<div><label>${f.l}</label><input name="${f.k}" type="${f.t || "text"}" step="any" value="${esc(v)}" ${f.req ? "required" : ""}></div>`;
+}
+function formHTML(id, fields, btn) {
+  return `<form id="${id}"><div class="grid">${fields.map(f => field(f)).join("")}</div><p><button class="btn">${btn}</button></p></form>`;
+}
+function bindForm(id, fields, cb) {
+  $("#" + id).onsubmit = e => {
+    e.preventDefault();
+    const fd = new FormData(e.target), r = { id: uid() };
+    fields.forEach(f => { const v = fd.get(f.k); r[f.k] = (f.t === "number") ? num(v) : v; });
+    cb(r); save(); render();
+  };
+}
+function tableHTML(rows, cols, key) {
+  if (!rows.length) return `<p class="muted">No records yet.</p>`;
+  return `<div class="tw"><table><tr>${cols.map(c => `<th>${c.l}</th>`).join("")}<th></th></tr>` +
+    rows.map(r => `<tr>${cols.map(c => `<td>${c.f ? c.f(r) : esc(r[c.k])}</td>`).join("")}<td><button class="del" data-k="${key}" data-id="${r.id}" title="Delete">✕</button></td></tr>`).join("") + `</table></div>`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("button.del"); if (!b) return;
+  if (!confirm("Delete this record?")) return;
+  const k = b.dataset.k; db[k] = db[k].filter(r => r.id !== b.dataset.id); save(); render();
+});
+
+/* ---------- NBU calculations ---------- */
+function latestWeightG(p) {
+  const w = db.weights.filter(x => x.pid === p.id).sort((a, b) => a.date.localeCompare(b.date));
+  return w.length ? w[w.length - 1].g : (p.bw || null);
+}
+function nbuSummary(p, date) {
+  const S = db.settings, out = { alerts: [] };
+  const wts = db.weights.filter(x => x.pid === p.id).sort((a, b) => a.date.localeCompare(b.date));
+  const wG = (wts.filter(x => x.date <= date).pop() || {}).g || p.bw || null;
+  const kg = wG ? wG / 1000 : null;
+  out.weightG = wG;
+  out.dol = p.dob ? daysBetween(p.dob, date) + 1 : null;
+  out.cga = (p.ga != null && p.dob) ? p.ga + (daysBetween(p.dob, date)) / 7 : null;
+  out.wtChangePct = (p.bw && wG) ? (wG - p.bw) / p.bw * 100 : null;
+
+  const feeds = db.feeds.filter(x => x.pid === p.id && x.dt.slice(0, 10) === date);
+  const offered = feeds.reduce((s, x) => s + (x.offered || 0), 0);
+  const taken = feeds.reduce((s, x) => s + (x.taken || 0), 0);
+  const enteralKcal = feeds.reduce((s, x) => s + (x.taken || 0) * (S.milk[x.milk] || 67) / 100, 0);
+  const tp = db.tpn.filter(x => x.pid === p.id && x.date === date);
+  const tpnVol = tp.reduce((s, x) => s + (x.vol || 0), 0);
+  const tpnKcal = tp.reduce((s, x) => s + (x.dex || 0) * 3.4 + (x.aa || 0) * 4 + (x.lipid || 0) * 10, 0);
+  Object.assign(out, { feedsN: feeds.length, offered, taken, tpnVol,
+    enteralMlKg: kg ? taken / kg : null, tpnMlKg: kg ? tpnVol / kg : null,
+    totalMlKg: kg ? (taken + tpnVol) / kg : null, kcalKg: kg ? (enteralKcal + tpnKcal) / kg : null,
+    enteralPct: (taken + tpnVol) ? taken / (taken + tpnVol) * 100 : null });
+
+  // prescription (latest on or before date)
+  const rx = db.prescriptions.filter(x => x.pid === p.id && x.date <= date).sort((a, b) => a.date.localeCompare(b.date)).pop();
+  out.rx = rx;
+  if (rx && kg && rx.target) {
+    out.targetMl = rx.target * kg;
+    const pct = taken / out.targetMl * 100; out.pctTarget = pct;
+    if (feeds.length && pct < S.intakePct) out.alerts.push(["w", `Enteral intake ${f1(pct)}% of prescribed target (below ${S.intakePct}%).`]);
+  }
+  if (rx && rx.freq && feeds.length && feeds.length < rx.freq) out.alerts.push(["w", `${feeds.length} of ${rx.freq} prescribed feeds logged for ${date}.`]);
+  // intolerance flags
+  const big = feeds.filter(x => x.asp != null && x.offered && x.asp / x.offered * 100 >= S.aspPct).length;
+  if (big) out.alerts.push(["w", `${big} large aspirate(s) (≥${S.aspPct}% of feed volume).`]);
+  const vom = feeds.filter(x => x.vomit === "Yes").length, dis = feeds.filter(x => x.dist === "Yes").length;
+  if (vom) out.alerts.push(["w", `Vomiting recorded with ${vom} feed(s).`]);
+  if (dis) out.alerts.push(["w", `Abdominal distension recorded with ${dis} feed(s).`]);
+  if (vom + dis + big >= 3) out.alerts.push(["b", "Multiple intolerance signs today. Review with the clinical team."]);
+  // weight alerts
+  if (out.wtChangePct != null && out.wtChangePct <= -S.wlPct) out.alerts.push(["b", `Weight ${f1(out.wtChangePct)}% from birth weight (alert threshold −${S.wlPct}%).`]);
+  const upto = wts.filter(x => x.date <= date);
+  if (upto.length >= 2) {
+    const last = upto[upto.length - 1], ref = upto.filter(x => daysBetween(x.date, last.date) >= S.noGainDays).pop();
+    if (ref) { const v = ((last.g - ref.g) / daysBetween(ref.date, last.date)) / ((last.g + ref.g) / 2 / 1000); out.velocity = v;
+      if (last.g <= ref.g) out.alerts.push(["w", `No weight gain over ${daysBetween(ref.date, last.date)} days.`]); }
+  }
+  if (out.kcalKg != null && out.kcalKg < S.kcalTarget * 0.7 && (taken + tpnVol) > 0) out.alerts.push(["w", `Energy ${f1(out.kcalKg)} kcal/kg/day is well below the ${S.kcalTarget} reference.`]);
+  return out;
+}
+
+/* ---------- weight chart (SVG) ---------- */
+function weightChart(p) {
+  const pts = db.weights.filter(x => x.pid === p.id).sort((a, b) => a.date.localeCompare(b.date));
+  if (pts.length < 2) return `<p class="muted">Add at least two weights to see the trend.</p>`;
+  const W = 600, H = 200, m = 34, ys = pts.map(x => x.g), lo = Math.min(...ys, p.bw || Infinity) - 50, hi = Math.max(...ys, p.bw || 0) + 50;
+  const t0 = new Date(pts[0].date).getTime(), t1 = new Date(pts[pts.length - 1].date).getTime() || t0 + 1;
+  const X = d => m + (new Date(d).getTime() - t0) / Math.max(1, t1 - t0) * (W - 2 * m), Y = g => H - m - (g - lo) / (hi - lo) * (H - 2 * m);
+  const path = pts.map((x, i) => (i ? "L" : "M") + X(x.date).toFixed(1) + " " + Y(x.g).toFixed(1)).join(" ");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Weight trend">
+  <line x1="${m}" y1="${H - m}" x2="${W - m}" y2="${H - m}" stroke="#bbb"/><line x1="${m}" y1="${m}" x2="${m}" y2="${H - m}" stroke="#bbb"/>
+  ${p.bw ? `<line x1="${m}" y1="${Y(p.bw)}" x2="${W - m}" y2="${Y(p.bw)}" stroke="#b45309" stroke-dasharray="4"/><text x="${W - m}" y="${Y(p.bw) - 4}" font-size="10" text-anchor="end" fill="#b45309">birth weight ${p.bw} g</text>` : ""}
+  <path d="${path}" fill="none" stroke="#0b6e75" stroke-width="2"/>
+  ${pts.map(x => `<circle cx="${X(x.date)}" cy="${Y(x.g)}" r="3" fill="#0b6e75"/>`).join("")}
+  <text x="${m}" y="${H - 12}" font-size="10" fill="#666">${pts[0].date}</text><text x="${W - m}" y="${H - 12}" font-size="10" text-anchor="end" fill="#666">${pts[pts.length - 1].date}</text>
+  <text x="4" y="${m}" font-size="10" fill="#666">${Math.round(hi)} g</text><text x="4" y="${H - m}" font-size="10" fill="#666">${Math.round(lo)} g</text></svg>`;
+}
+
+/* ---------- views ---------- */
+const TABS = [["dashboard", "Dashboard"], ["patients", "Patients"], ["nutrition", "Nutrition care"], ["meds", "Medication"], ["tpn", "TPN"], ["nbu", "NBU feeds"], ["settings", "Settings & data"]];
+
+function render() {
+  if (pid && !patient()) pid = "";
+  $("#nav").innerHTML = TABS.map(([k, l]) => `<button class="${k === tab ? "on" : ""}" data-t="${k}">${l}</button>`).join("");
+  $("#nav").onclick = e => { const t = e.target.dataset.t; if (t) { tab = t; render(); } };
+  const needsPt = !["patients", "settings"].includes(tab);
+  let h = "";
+  if (tab !== "settings") {
+    h += `<div class="bar"><div style="min-width:240px"><label>Active patient</label><select id="psel"><option value="">— select —</option>${db.patients.map(p => `<option value="${p.id}" ${p.id === pid ? "selected" : ""}>${esc(p.name)} (${esc(p.mrn || "no MRN")}) · ${esc(p.unit)}</option>`).join("")}</select></div></div>`;
+  }
+  if (needsPt && !pid) h += `<div class="card"><p>Select or <a href="#" id="goPt">add a patient</a> to continue.</p></div>`;
+  else h += views[tab]();
+  $("#view").innerHTML = h;
+  const ps = $("#psel"); if (ps) ps.onchange = () => { pid = ps.value; localStorage.setItem("ccnm_pid", pid); render(); };
+  const g = $("#goPt"); if (g) g.onclick = e => { e.preventDefault(); tab = "patients"; render(); };
+  (afterRender[tab] || (() => {}))();
+}
+
+const UNITS = ["Critical care", "Renal unit", "NBU (neonatal)"];
+const F_PATIENT = [{ k: "name", l: "Name / ID alias", req: 1 }, { k: "mrn", l: "MRN" }, { k: "unit", l: "Unit", t: "select", o: UNITS },
+  { k: "dob", l: "Date of birth", t: "date", req: 1 }, { k: "ga", l: "Gestational age at birth (weeks, NBU)", t: "number" }, { k: "bw", l: "Birth weight (g, NBU)", t: "number" }, { k: "dx", l: "Admission note (not a diagnosis)" }];
+const F_NUT = [{ k: "date", l: "Date", t: "date", def: todayStr(), req: 1 }, { k: "wt", l: "Weight (kg)", t: "number" }, { k: "route", l: "Route", t: "select", o: ["Oral", "Enteral tube", "Parenteral", "Mixed"] },
+  { k: "eT", l: "Energy target (kcal)", t: "number" }, { k: "eG", l: "Energy given (kcal)", t: "number" }, { k: "pT", l: "Protein target (g)", t: "number" }, { k: "pG", l: "Protein given (g)", t: "number" },
+  { k: "fIn", l: "Fluid in (ml)", t: "number" }, { k: "fOut", l: "Fluid out (ml)", t: "number" }, { k: "k", l: "K⁺ (mmol/L)", t: "number" }, { k: "na", l: "Na⁺ (mmol/L)", t: "number" },
+  { k: "po4", l: "PO₄ (mmol/L)", t: "number" }, { k: "ur", l: "Urea (mmol/L)", t: "number" }, { k: "cr", l: "Creatinine (µmol/L)", t: "number" }, { k: "note", l: "Notes", t: "area" }];
+const F_MED = [{ k: "date", l: "Start date", t: "date", def: todayStr(), req: 1 }, { k: "drug", l: "Drug", req: 1 }, { k: "dose", l: "Dose" }, { k: "route", l: "Route", t: "select", o: ["PO", "IV", "NG/OG", "SC", "Other"] },
+  { k: "freq", l: "Frequency" }, { k: "status", l: "Status", t: "select", o: ["Active", "Stopped"] }, { k: "nut", l: "Nutrition / feeding relevance", t: "area" }];
+const F_TPN = [{ k: "date", l: "Date", t: "date", def: todayStr(), req: 1 }, { k: "vol", l: "Total volume (ml)", t: "number", req: 1 }, { k: "dex", l: "Dextrose (g)", t: "number" }, { k: "aa", l: "Amino acids (g)", t: "number" },
+  { k: "lipid", l: "Lipid (g)", t: "number" }, { k: "lyte", l: "Electrolytes / additives" }, { k: "line", l: "Line / access" }, { k: "note", l: "Notes", t: "area" }];
+const F_RX = [{ k: "date", l: "From date", t: "date", def: todayStr(), req: 1 }, { k: "milk", l: "Milk type", t: "select", o: Object.keys(DEFAULTS.settings.milk) }, { k: "target", l: "Target (ml/kg/day)", t: "number", req: 1 },
+  { k: "freq", l: "Feeds per day", t: "number" }, { k: "route", l: "Route", t: "select", o: ["Oral / breast", "Cup", "NG", "OG", "Bolus tube", "Continuous tube"] }, { k: "plan", l: "Advancement plan", t: "area" }];
+const F_FEED = [{ k: "dt", l: "Date & time", t: "datetime-local", def: nowLocal(), req: 1 }, { k: "milk", l: "Milk", t: "select", o: Object.keys(DEFAULTS.settings.milk) }, { k: "offered", l: "Offered (ml)", t: "number", req: 1 }, { k: "taken", l: "Taken (ml)", t: "number", req: 1 },
+  { k: "route", l: "Route", t: "select", o: ["Oral / breast", "Cup", "NG", "OG", "Bolus tube", "Continuous tube"] }, { k: "asp", l: "Aspirate (ml)", t: "number" }, { k: "vomit", l: "Vomiting", t: "select", o: ["No", "Yes"] },
+  { k: "dist", l: "Abdominal distension", t: "select", o: ["No", "Yes"] }, { k: "stool", l: "Stool / output note" }];
+const F_W = [{ k: "date", l: "Date", t: "date", def: todayStr(), req: 1 }, { k: "g", l: "Weight (g)", t: "number", req: 1 }];
+
+const views = {
+  dashboard() {
+    const p = patient(); let h = `<div class="card"><h2>${esc(p.name)} <span class="tag">${esc(p.unit)}</span></h2>`;
+    if (p.unit.startsWith("NBU")) {
+      const s = nbuSummary(p, todayStr());
+      h += `<div class="grid">${[["Day of life", s.dol], ["Corrected GA (wk)", f1(s.cga)], ["Weight (g)", s.weightG ?? "–"], ["Δ vs birth wt", s.wtChangePct == null ? "–" : f1(s.wtChangePct) + "%"],
+        ["Total fluid ml/kg", f1(s.totalMlKg)], ["Energy kcal/kg", f1(s.kcalKg)]].map(([l, v]) => `<div class="stat"><b>${v ?? "–"}</b><span>${l} (today)</span></div>`).join("")}</div>
+        <h2 style="margin-top:14px">Alerts</h2>${s.alerts.length ? s.alerts.map(a => `<div class="al ${a[0]}">${esc(a[1])}</div>`).join("") : `<div class="al o">No alerts from logged data today.</div>`}`;
+    } else {
+      const n = mine("nutrition").sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (!n) h += `<p class="muted">No nutrition records yet.</p>`;
+      else {
+        const eP = n.eT ? n.eG / n.eT * 100 : null, pP = n.pT ? n.pG / n.pT * 100 : null;
+        h += `<div class="grid">${[["Energy % of target", f1(eP)], ["Protein % of target", f1(pP)], ["Fluid balance (ml)", n.fIn != null && n.fOut != null ? f1(n.fIn - n.fOut) : "–"], ["Weight (kg)", n.wt ?? "–"]].map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l} (${n.date})</span></div>`).join("")}</div>`;
+        if (eP != null && eP < 70) h += `<div class="al w">Energy delivery below 70% of target on ${n.date}.</div>`;
+        if (pP != null && pP < 70) h += `<div class="al w">Protein delivery below 70% of target on ${n.date}.</div>`;
+        if (p.unit === "Renal unit") { if (n.k > 5.5) h += `<div class="al w">K⁺ ${n.k} mmol/L above 5.5. Review with the renal team.</div>`; if (n.po4 > 1.8) h += `<div class="al w">PO₄ ${n.po4} mmol/L is high. Review with the renal team.</div>`; }
+      }
+    }
+    h += `</div><div class="card"><h2>Active medication</h2>${mine("meds").filter(m => m.status === "Active").map(m => `<div>• ${esc(m.drug)} ${esc(m.dose)} ${esc(m.route)} ${esc(m.freq)}</div>`).join("") || `<span class="muted">None recorded.</span>`}</div>`;
+    return h;
+  },
+  patients() {
+    return `<div class="card"><h2>Add patient</h2>${formHTML("fP", F_PATIENT, "Add patient")}</div><div class="card"><h2>Patients</h2>` +
+      tableHTML(db.patients, [{ l: "Name", k: "name" }, { l: "MRN", k: "mrn" }, { l: "Unit", k: "unit" }, { l: "DOB", k: "dob" }, { l: "GA wk", k: "ga" }, { l: "BW g", k: "bw" }], "patients") + `</div>`;
+  },
+  nutrition() {
+    const rows = mine("nutrition").sort((a, b) => b.date.localeCompare(a.date));
+    return `<div class="card"><h2>Record nutrition care</h2>${formHTML("fN", F_NUT, "Save")}</div><div class="card"><h2>History</h2>` +
+      tableHTML(rows, [{ l: "Date", k: "date" }, { l: "Wt kg", k: "wt" }, { l: "Route", k: "route" }, { l: "Energy given/target", f: r => `${r.eG ?? "–"}/${r.eT ?? "–"}` }, { l: "Protein given/target", f: r => `${r.pG ?? "–"}/${r.pT ?? "–"}` },
+        { l: "Fluid in/out", f: r => `${r.fIn ?? "–"}/${r.fOut ?? "–"}` }, { l: "K / Na / PO₄", f: r => `${r.k ?? "–"} / ${r.na ?? "–"} / ${r.po4 ?? "–"}` }, { l: "Urea / Creat", f: r => `${r.ur ?? "–"} / ${r.cr ?? "–"}` }], "nutrition") + `</div>`;
+  },
+  meds() {
+    return `<div class="card"><h2>Add medication</h2>${formHTML("fM", F_MED, "Add")}</div><div class="card"><h2>Medication list</h2>` +
+      tableHTML(mine("meds").sort((a, b) => b.date.localeCompare(a.date)), [{ l: "Start", k: "date" }, { l: "Drug", k: "drug" }, { l: "Dose", k: "dose" }, { l: "Route", k: "route" }, { l: "Freq", k: "freq" }, { l: "Status", k: "status" }, { l: "Nutrition note", k: "nut" }], "meds") + `</div>`;
+  },
+  tpn() {
+    const p = patient(), kgNow = p.unit.startsWith("NBU") ? (latestWeightG(p) || 0) / 1000 : (mine("nutrition").sort((a, b) => b.date.localeCompare(a.date)).find(n => n.wt) || {}).wt;
+    return `<div class="card"><h2>Record TPN</h2>${formHTML("fT", F_TPN, "Save")}<p class="muted">Energy is calculated as dextrose 3.4, amino acids 4 and lipid 10 kcal/g.</p></div><div class="card"><h2>TPN history</h2>` +
+      tableHTML(mine("tpn").sort((a, b) => b.date.localeCompare(a.date)), [{ l: "Date", k: "date" }, { l: "Vol ml", k: "vol" }, { l: "Dex g", k: "dex" }, { l: "AA g", k: "aa" }, { l: "Lipid g", k: "lipid" },
+        { l: "kcal", f: r => f1((r.dex || 0) * 3.4 + (r.aa || 0) * 4 + (r.lipid || 0) * 10) }, { l: "kcal/kg", f: r => kgNow ? f1(((r.dex || 0) * 3.4 + (r.aa || 0) * 4 + (r.lipid || 0) * 10) / kgNow) : "–" },
+        { l: "GIR mg/kg/min", f: r => kgNow && r.dex ? f1(r.dex * 1000 / kgNow / 1440) : "–" }, { l: "Additives", k: "lyte" }], "tpn") + `</div>`;
+  },
+  nbu() {
+    const p = patient();
+    if (!p.unit.startsWith("NBU")) return `<div class="card"><p>The active patient is not an NBU patient. Set the unit to “NBU (neonatal)” in Patients, or select a baby.</p></div>`;
+    const d = window._nbuDate || todayStr(), s = nbuSummary(p, d);
+    const feeds = mine("feeds").filter(f => f.dt.slice(0, 10) === d).sort((a, b) => a.dt.localeCompare(b.dt));
+    return `<div class="card"><div class="bar"><h2 style="margin:0">Daily summary</h2><div><label>Date</label><input type="date" id="nbuD" value="${d}"></div></div>
+      <div class="grid">${[["Weight g", s.weightG], ["Feeds logged", s.feedsN + (s.rx && s.rx.freq ? "/" + s.rx.freq : "")], ["Enteral ml/kg", f1(s.enteralMlKg)], ["TPN ml/kg", f1(s.tpnMlKg)], ["Total ml/kg", f1(s.totalMlKg)],
+        ["% of target", s.pctTarget == null ? "–" : f1(s.pctTarget) + "%"], ["Energy kcal/kg", f1(s.kcalKg)], ["Enteral share", s.enteralPct == null ? "–" : f1(s.enteralPct) + "%"], ["Gain g/kg/day", f1(s.velocity)]]
+        .map(([l, v]) => `<div class="stat"><b>${v ?? "–"}</b><span>${l}</span></div>`).join("")}</div>
+      ${s.alerts.map(a => `<div class="al ${a[0]}">${esc(a[1])}</div>`).join("")}</div>
+      <div class="card"><h2>Log a feed</h2>${formHTML("fF", F_FEED, "Log feed")}</div>
+      <div class="card"><h2>Feeds on ${d}</h2>${tableHTML(feeds, [{ l: "Time", f: r => r.dt.slice(11, 16) }, { l: "Milk", k: "milk" }, { l: "Offered", k: "offered" }, { l: "Taken", k: "taken" }, { l: "Route", k: "route" }, { l: "Aspirate", k: "asp" }, { l: "Vomit", k: "vomit" }, { l: "Distension", k: "dist" }, { l: "Stool", k: "stool" }], "feeds")}</div>
+      <div class="card"><h2>Feed prescription</h2>${formHTML("fR", F_RX, "Save prescription")}${tableHTML(mine("prescriptions").sort((a, b) => b.date.localeCompare(a.date)), [{ l: "From", k: "date" }, { l: "Milk", k: "milk" }, { l: "ml/kg/day", k: "target" }, { l: "Feeds/day", k: "freq" }, { l: "Route", k: "route" }, { l: "Plan", k: "plan" }], "prescriptions")}</div>
+      <div class="card"><h2>Weight &amp; growth</h2>${formHTML("fW", F_W, "Add weight")}${weightChart(p)}${tableHTML(mine("weights").sort((a, b) => b.date.localeCompare(a.date)), [{ l: "Date", k: "date" }, { l: "Weight g", k: "g" }, { l: "Δ vs birth", f: r => p.bw ? f1((r.g - p.bw) / p.bw * 100) + "%" : "–" }], "weights")}</div>`;
+  },
+  settings() {
+    const S = db.settings;
+    return `<div class="card"><h2>NBU alert thresholds (set per local protocol)</h2><form id="fS"><div class="grid">
+      ${[["wlPct", "Weight loss alert (% of birth wt)"], ["noGainDays", "No-gain window (days)"], ["intakePct", "Low intake (% of target)"], ["aspPct", "Large aspirate (% of feed)"], ["kcalTarget", "Energy reference (kcal/kg/day)"]].map(([k, l]) => `<div><label>${l}</label><input type="number" step="any" name="${k}" value="${S[k]}"></div>`).join("")}
+      ${Object.keys(S.milk).map(m => `<div><label>${esc(m)} (kcal/100 ml)</label><input type="number" step="any" name="milk:${esc(m)}" value="${S.milk[m]}"></div>`).join("")}</div><p><button class="btn">Save settings</button></p></form></div>
+      <div class="card"><h2>Data</h2><p class="muted">All data stays in this browser. Use patient aliases rather than identifying details unless your governance allows otherwise. Export regularly.</p>
+      <button class="btn" id="exp">Export JSON</button> <button class="btn sec" id="imp">Import JSON</button> <button class="btn sec" id="wipe">Erase all data</button><input type="file" id="file" accept=".json" hidden></div>`;
+  }
+};
+
+const afterRender = {
+  patients() { bindForm("fP", F_PATIENT, r => { db.patients.push(r); pid = r.id; localStorage.setItem("ccnm_pid", pid); }); },
+  nutrition() { bindForm("fN", F_NUT, r => { r.pid = pid; db.nutrition.push(r); }); },
+  meds() { bindForm("fM", F_MED, r => { r.pid = pid; db.meds.push(r); }); },
+  tpn() { bindForm("fT", F_TPN, r => { r.pid = pid; db.tpn.push(r); }); },
+  nbu() {
+    if (!$("#fF")) return;
+    $("#nbuD").onchange = e => { window._nbuDate = e.target.value; render(); };
+    bindForm("fF", F_FEED, r => { r.pid = pid; db.feeds.push(r); });
+    bindForm("fR", F_RX, r => { r.pid = pid; db.prescriptions.push(r); });
+    bindForm("fW", F_W, r => { r.pid = pid; db.weights.push(r); });
+  },
+  settings() {
+    $("#fS").onsubmit = e => { e.preventDefault(); const fd = new FormData(e.target);
+      for (const [k, v] of fd.entries()) { if (k.startsWith("milk:")) db.settings.milk[k.slice(5)] = +v; else db.settings[k] = +v; } save(); alert("Saved."); };
+    $("#exp").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(db, null, 2)], { type: "application/json" })); a.download = "ccnm-backup-" + todayStr() + ".json"; a.click(); };
+    $("#imp").onclick = () => $("#file").click();
+    $("#file").onchange = e => { const r = new FileReader(); r.onload = () => { try { db = Object.assign({}, DEFAULTS, JSON.parse(r.result)); save(); render(); } catch (x) { alert("Invalid file."); } }; r.readAsText(e.target.files[0]); };
+    $("#wipe").onclick = () => { if (confirm("Erase ALL data in this browser?")) { localStorage.removeItem(KEY); db = load(); pid = ""; render(); } };
+  }
+};
+render();
+</script>
+</body>
+</html>
