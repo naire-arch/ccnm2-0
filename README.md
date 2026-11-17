@@ -13,9 +13,7 @@ A single-page web app for monitoring and evaluating patient progress with nutrit
 - **Settings & data**: alert thresholds, milk kcal values, JSON export/import
 
 ## Run it
-No build step and no dependencies.
-- Locally: open `index.html` in a browser.
-- GitHub Pages: push `index.html` and `README.md` to a repo, then **Settings → Pages → Deploy from branch → main / (root)**. The app is served at `https://naire-arch.github.io/ccnm/`.
+https://naire-arch.github.io/ccnm/.
 
 ## Data and privacy
 All data is stored in the browser's `localStorage` on that device only. Nothing is sent anywhere. Use patient aliases unless your governance permits identifiers, and export JSON backups regularly. Clearing browser data erases records.
